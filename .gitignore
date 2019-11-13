@@ -1,0 +1,17 @@
+# not include notebooks
+.ipynb_checkpoints
+
+# not include data
+MAT
+*.npz
+*.npy
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+
+# not include config files
+.idea
+.DS_Store
+__pycache__
+
