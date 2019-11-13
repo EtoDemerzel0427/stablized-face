@@ -9,6 +9,7 @@ MAT
 *.jpeg
 *.mp4
 *.avi
+*.obj
 
 # not include config files
 .idea
