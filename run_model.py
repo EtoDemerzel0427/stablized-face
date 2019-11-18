@@ -17,36 +17,37 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+def apply_exp():
+    pass
 
-def build_model(core, beta, embedding, rt):
-    """
-    From 3d to 2d.
-    :param core: (3xn) x exp_num [here (3x7794) x 47]
-    :param beta: (exp_num - 1) x ncluster [here 46 x 1]
-    :param embedding: n x nclusters. [here 7794 x 12] embedding matrix.
-    :param rt: extrinsic matrix, 3 x 4
-    :return:
-    model: n x 3, the first 2 dims are (x,y), z indicates depth, for rendering use.
-    """
-    scale = 160.53447   # TODO： 这个是从之前matlab代码求出来的前20张图片的f的平均值
+def apply_pose():
+    pass
 
-    face = np.expand_dims(core[:, 0], 1) + np.dot(core[:, 1:], beta)  # (3 x n) x 12
-    face = np.sum(face * np.repeat(embedding, 3, axis=0), axis=1).reshape(-1, 3).T  # 3 x n
-    face = np.vstack((face, np.ones((1, face.shape[1]))))  # 4 x n
-    # scale * rotation * face + translation
+# def build_model(face, rt):
+#     """
+#     From 3d to 2d.
+#     :param core: (3xn) x exp_num [here (3x7794) x 47]
+#     :param beta: (exp_num - 1) x ncluster [here 46 x 1]
+#     :param embedding: n x nclusters. [here 7794 x 12] embedding matrix.
+#     :param rt: extrinsic matrix, 3 x 4
+#     :return:
+#     model: n x 3, the first 2 dims are (x,y), z indicates depth, for rendering use.
+#     """
+#     # scale * rotation * face + translation
+#     rt[:, :3] *= scale
+#     model = np.dot(rt, face)
+#
+#     return model
+
+
+def pose_loss(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i):
+    scale = 1
     rt[:, :3] *= scale
-    model = np.dot(rt, face)
-
-    return model
-
-
-def pose_loss(rt, core, beta, embedding, face_index, landmarks, points, inst, prev_projected, prev_rt, i):
-    model = build_model(core, beta, embedding, rt)
-    projected = model[:2, :]
-
-
+    projected = np.dot(rt, face)[:2, :]
+    # model = build_model(face, rt)
+    # projected = model[:2, :]
     # the landmark loss value
-    key_loss = landmark_loss(projected, face_index, landmarks, points, w, pose=True)
+    key_loss = landmark_loss(projected, landmarks, points, w, pose=True)
     # print("Landmark energy：", key_loss)
 
     # the dense optical flow loss
@@ -68,15 +69,16 @@ def pose_loss(rt, core, beta, embedding, face_index, landmarks, points, inst, pr
     return key_loss # + 0.01 * dis_loss + temp_loss
 
 
-def pose_opt(flat_rt, core, beta, embedding, face_index, landmarks, points, inst, prev_projected, prev_rt, i):
+def pose_opt(flat_rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i):
     def f(flat_rt):
         rt = flat_rt.reshape(-1, 4)
-        return pose_loss(rt, core, beta, embedding, face_index, landmarks, points, inst, prev_projected, prev_rt, i)
+        return pose_loss(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i)
 
     print(bcolors.HEADER + "[Start Opt] Processing..." + bcolors.ENDC)
     res = scipy.optimize.minimize(f, flat_rt, options={'disp':True})
     if not res.success:
         print(bcolors.FAIL + f'[Opt END] Opt Success: {res.success}' + bcolors.ENDC)
+        print(bcolors.FAIL + res.message + bcolors.ENDC)
     else:
         print(bcolors.OKGREEN + f'[Opt END] Opt Success: {res.success}' + bcolors.ENDC)
     new_rt = res.x.reshape(-1, 4)
@@ -92,6 +94,7 @@ n_cluster = 12
 weight = np.ones((n_cluster, 1))  # todo: change to dynamic weight
 w = np.dot(embedding, weight)
 
+
 # 2. region-based multi-linear face model
 # 2.1 gather base data
 print(bcolors.OKGREEN + "[Loading data] load_all_mat..." + bcolors.ENDC)
@@ -101,6 +104,9 @@ print(bcolors.OKBLUE + "[Loaded] Done!" + bcolors.ENDC)
 
 
 landmarks = index_new87.squeeze() - 1
+mapped = dict(zip(face_index, np.arange(len(face_index))))
+landmarks = [mapped[i] for i in landmarks]  # map to the row of projected matrix
+
 # TODO: learn shape weight from online adaptation method
 shape_weight = np.load('/Users/momo/Desktop/face_model/para_id.npy')  # 50 x 1, result from another model
 
@@ -124,6 +130,7 @@ rt = np.zeros((3, 4))  # pose parameters: [R|t] extrinsic matrix
 rt[:, :3] = np.eye(3)
 
 
+
 # 2.3 build model
 inst = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_FAST)  # online version: should be fast.
 inst.setUseSpatialPropagation(True)
@@ -134,14 +141,25 @@ for i in range(len(pic_names)):
     points = np.loadtxt(pt_names[i])  # 87 x 2
 
     beta = np.zeros((46, n_cluster))  # 46 x 12 expression parameters
-    rt = np.random.random((3, 4))  # pose parameters: [R|t] extrinsic matrix
+    rt = np.zeros((3, 4))  # pose parameters: [R|t] extrinsic matrix
+    rt[:,:3] = np.eye(3)
 
-    # perform pose optmization
-    # rt = rt.flatten()
-    # rt = pose_opt(rt, core, beta, embedding, face_index, landmarks, points, inst, prev_projected, prev_rt, i)
-    #
-    # prev_projected = build_model(core, beta, embedding, rt)[:2, :]
-    # prev_rt = rt
+    # 2.4 perform pose optimization
+    # 2.4.1 apply expression parameters
+    face = np.expand_dims(core[:, 0], 1) + np.dot(core[:, 1:], beta)  # (3 x n) x 12
+    face = np.sum(face * np.repeat(embedding, 3, axis=0), axis=1).reshape(-1, 3).T  # 3 x n
+    face = np.vstack((face, np.ones((1, face.shape[1]))))  # 4 x n
+
+    # 2.4.2 optimize pose parameters
+    rt = rt.flatten()
+    rt = pose_opt(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i)
+
+    # print('optimized rt: ', rt)
+    scale = 1 #160.53447  # TODO： 这个是从之前matlab代码求出来的前20张图片的f的平均值
+    rt[:, :3] *= scale
+    prev_projected = np.dot(rt, face)[:2, :]
+    prev_rt = rt
+
     if i == 2:
         break
 
