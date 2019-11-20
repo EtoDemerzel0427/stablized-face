@@ -47,6 +47,8 @@ right_bu = get_index('right_bu.obj')[:, 1]
 down = get_index('down.obj')[:, 1]
 neck = get_index('neck.obj')[:, 1]
 
+print(down)
+
 # these regions does not share any neighbors currently. total number is 6633 now.
 from functools import reduce
 all_index = reduce(np.union1d, (head, left_eb, right_eb, left_side, right_side, left_cheek, right_cheek, left_bu,
@@ -157,7 +159,7 @@ for key, value in clusters.items():
     for col in value:
         embedding[mapped[key], col] = 1/len(value)
 
-np.save('embedding', embedding)
+#np.save('embedding', embedding)
 print(embedding[:10, :])
 print(embedding[655:680, :])
 print(embedding.shape)

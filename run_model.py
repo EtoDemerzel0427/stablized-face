@@ -1,11 +1,13 @@
 import numpy as np
 import scipy.optimize
+from scipy import interpolate
 import glob
 import os
 import cv2
 from load_all_mat import load_all_mat
 from landmark import landmark_loss
 from dis_flow import dis_flow_loss
+from temporal import calc_eta, temporal_loss
 
 class bcolors:
     HEADER = '\033[95m'
@@ -40,7 +42,7 @@ def apply_pose():
 #     return model
 
 
-def pose_loss(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i):
+def pose_loss(rt, face, landmarks, points, w, vec_fx, vec_fy, prev_projected, prev_rt, i):
     scale = 1
     rt[:, :3] *= scale
     projected = np.dot(rt, face)[:2, :]
@@ -51,28 +53,36 @@ def pose_loss(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i):
     # print("Landmark energy：", key_loss)
 
     # the dense optical flow loss
-    # if i == 0:
-    #     dis_loss = 0
-    #     temp_loss = 0
-    # else:
-    #     prev = cv2.imread(pic_names[i - 1])
-    #     cur = cv2.imread(pic_names[i])
-    #     prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
-    #     cur_gray = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
-    #
-    #     dis_loss = dis_flow_loss(prev_gray, cur_gray, inst, prev_projected, projected, w, pose=True)
-    #     print("Dense flow energy: ", dis_loss)
-    #
-    #     # todo add temp_loss
-    #     temp_loss = 0
+    if i == 0:
+        dis_loss = 0
+        temp_loss = 0
+    else:
+        # prev = cv2.imread(pic_names[i - 1])
+        # cur = cv2.imread(pic_names[i])
+        # prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+        # cur_gray = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
 
-    return key_loss # + 0.01 * dis_loss + temp_loss
+        if not os.path.exists('flow_select.npy'):
+            np.random.seed(42)
+            flow_select = np.random.randint(0, projected.shape[1], size=300)
+            np.save('flow_select', flow_select)
+        else:
+            flow_select = np.load('flow_select.npy')
+        projected, prev_projected, w = projected[:, flow_select], prev_projected[:, flow_select], w[flow_select, :]
+
+        dis_loss, motion = dis_flow_loss(vec_fx, vec_fy, prev_projected, projected, w, pose=True)
+        # print("Dense flow energy: ", dis_loss)
+        w = np.ones((12, 1))  # todo: load w
+        eta = calc_eta(motion , w)
+        temp_loss = temporal_loss(rt, prev_rt, eta)
+
+    return key_loss  + 0.01 * dis_loss + temp_loss
 
 
-def pose_opt(flat_rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i):
+def pose_opt(flat_rt, face, landmarks, points, w, vec_fx, vec_fy, prev_projected, prev_rt, i):
     def f(flat_rt):
         rt = flat_rt.reshape(-1, 4)
-        return pose_loss(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i)
+        return pose_loss(rt, face, landmarks, points, w, vec_fx, vec_fy, prev_projected, prev_rt, i)
 
     print(bcolors.HEADER + "[Start Opt] Processing..." + bcolors.ENDC)
     res = scipy.optimize.minimize(f, flat_rt, options={'disp':True})
@@ -136,6 +146,7 @@ inst = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_FAST)  # online vers
 inst.setUseSpatialPropagation(True)
 
 prev_projected, prev_rt = None, None
+vec_fx, vec_fy = None, None
 for i in range(len(pic_names)):
     print(bcolors.OKGREEN + f'[Processing] pic number {i + 1}...' + bcolors.ENDC)
     points = np.loadtxt(pt_names[i])  # 87 x 2
@@ -150,9 +161,29 @@ for i in range(len(pic_names)):
     face = np.sum(face * np.repeat(embedding, 3, axis=0), axis=1).reshape(-1, 3).T  # 3 x n
     face = np.vstack((face, np.ones((1, face.shape[1]))))  # 4 x n
 
-    # 2.4.2 optimize pose parameters
+    # 2.4.2 calculate motion function outside the to-be-optimized function.
+    if i > 0:
+        print(bcolors.OKGREEN + '[Dis_Flow] Start calculate...' + bcolors.ENDC)
+        prev = cv2.imread(pic_names[i - 1])
+        cur = cv2.imread(pic_names[i])
+        prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+        cur_gray = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
+
+        flow = inst.calc(prev_gray, cur_gray, None)
+        height, width = prev_gray.shape
+
+        x = np.arange(height)
+        y = np.arange(width)
+        fx = interpolate.interp2d(x, y, flow[:, :, 0].T)
+        fy = interpolate.interp2d(x, y, flow[:, :, 1].T)
+
+        vec_fx, vec_fy = fx, fy
+
+        print(bcolors.OKBLUE + '[Dis_Flow] Done!')
+
+    # 2.4.3 optimize pose parameters
     rt = rt.flatten()
-    rt = pose_opt(rt, face, landmarks, points, w, inst, prev_projected, prev_rt, i)
+    rt = pose_opt(rt, face, landmarks, points, w, vec_fx, vec_fy, prev_projected, prev_rt, i)
 
     # print('optimized rt: ', rt)
     scale = 1 #160.53447  # TODO： 这个是从之前matlab代码求出来的前20张图片的f的平均值
