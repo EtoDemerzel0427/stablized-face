@@ -110,6 +110,9 @@ w = np.dot(embedding, weight)
 print(bcolors.OKGREEN + "[Loading data] load_all_mat..." + bcolors.ENDC)
 blendshapes, index_new87, mean_face, cr, single_value, w_exp_initial, \
 w_id_initial, triangles = load_all_mat(from_npy=True)  # core: 34530 x 50 x 47
+
+# down sample the mesh
+faces_load = triangles[:, 2].reshape(-1, 4)  # 2850 x 4
 print(bcolors.OKBLUE + "[Loaded] Done!" + bcolors.ENDC)
 
 
@@ -120,7 +123,7 @@ landmarks = [mapped[i] for i in landmarks]  # map to the row of projected matrix
 # TODO: learn shape weight from online adaptation method
 shape_weight = np.load('/Users/momo/Desktop/face_model/para_id.npy')  # 50 x 1, result from another model
 
-core = np.tensordot(cr, shape_weight, axes=(1,0)).squeeze()  # 34530 x 47
+core = np.tensordot(cr, shape_weight, axes=(1, 0)).squeeze()  # 34530 x 47
 
 keys = np.vstack((3 * face_index, 3 * face_index + 1, 3 * face_index + 2)).T
 keys = keys.flatten()
@@ -135,11 +138,9 @@ pic_names = sorted(glob.glob(os.path.join(root_path, '*.jpeg')))
 pt_names = sorted(glob.glob(os.path.join(root_path, '*lds87.txt')))
 print(bcolors.OKBLUE + f'[Counted] Total pic number is {len(pic_names)}' + bcolors.ENDC)
 
-beta = np.random.random((46, n_cluster))  # 46 x 12 expression parameters
+beta = np.zeros((46, n_cluster))  # 46 x 12 expression parameters
 rt = np.zeros((3, 4))  # pose parameters: [R|t] extrinsic matrix
 rt[:, :3] = np.eye(3)
-
-
 
 # 2.3 build model
 inst = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_FAST)  # online version: should be fast.
@@ -147,13 +148,14 @@ inst.setUseSpatialPropagation(True)
 
 prev_projected, prev_rt = None, None
 vec_fx, vec_fy = None, None
+height = 720
 for i in range(len(pic_names)):
     print(bcolors.OKGREEN + f'[Processing] pic number {i + 1}...' + bcolors.ENDC)
     points = np.loadtxt(pt_names[i])  # 87 x 2
 
     beta = np.zeros((46, n_cluster))  # 46 x 12 expression parameters
     rt = np.zeros((3, 4))  # pose parameters: [R|t] extrinsic matrix
-    rt[:,:3] = np.eye(3)
+    rt[:, :3] = np.eye(3)
 
     # 2.4 perform pose optimization
     # 2.4.1 apply expression parameters
@@ -186,13 +188,21 @@ for i in range(len(pic_names)):
     rt = pose_opt(rt, face, landmarks, points, w, vec_fx, vec_fy, prev_projected, prev_rt, i)
 
     # print('optimized rt: ', rt)
-    scale = 1 #160.53447  # TODO： 这个是从之前matlab代码求出来的前20张图片的f的平均值
+    scale = 1  # 160.53447  # TODO： 这个是从之前matlab代码求出来的前20张图片的f的平均值
     rt[:, :3] *= scale
-    prev_projected = np.dot(rt, face)[:2, :]
+
+    face = mean_face[face_index, :].T
+    face = np.vstack((face, np.ones(face.shape[1])))
+    viz = np.dot(rt, face)
+    prev_projected = viz[:2, :]
     prev_rt = rt
+    from visualize import visualize
 
-    if i == 2:
+    viz[1,:] = height - viz[1, :] + 1
+    viz[2, :] *= [(rt[0,0] - rt[1,1]) / 2]
+    visualize(viz.T, faces_load - 1, face_index, pic_names[i])
+    print(rt)
+    if i == 3:
+        # np.save('projected', viz)
+        # np.save('face_load', faces_load)
         break
-
-
-
