@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def landmark_loss(projected, landmarks, points, w, pose=True):
+def landmark_loss(projected, landmarks, points, w=None, pose=True):
     """
     landmark energy.
     :param projected: 2 x n. The projected 2d point of all vertices.
@@ -16,19 +16,25 @@ def landmark_loss(projected, landmarks, points, w, pose=True):
 
     cor = projected[:, landmarks].T
     diff = cor - points # n x 2
-    if pose:
-        w = w[landmarks]  # n x 1
-        #loss = np.mean(w * np.square(diff))
-        #loss = np.sqrt(np.mean(diff * diff)).squeeze()
 
-        loss = np.sqrt(np.mean(w * np.sum(diff * diff, axis=1, keepdims=True)))
-        #loss = np.mean(w * np.linalg.norm(diff, axis=1, keepdims=True))  # there is an abs op here, making derivative inconstant
-    else:
-        #loss = np.mean(np.linalg.norm(diff, axis=1))
-        # loss = np.mean(np.square(diff))
-        loss = np.sqrt(np.mean(diff * diff)).squeeze()
+    w = w[landmarks]  # n x 1
+    loss_0 = np.sqrt(np.mean(w * np.sum(diff * diff, axis=1, keepdims=True)))
+    loss_1 = np.sqrt(np.mean(diff * diff)).squeeze()
 
-    return loss
+    return loss_0, loss_1
+    # if pose:
+    #     w = w[landmarks]  # n x 1
+    #     #loss = np.mean(w * np.square(diff))
+    #     #loss = np.sqrt(np.mean(diff * diff)).squeeze()
+    #
+    #     loss = np.sqrt(np.mean(w * np.sum(diff * diff, axis=1, keepdims=True)))
+    #     #loss = np.mean(w * np.linalg.norm(diff, axis=1, keepdims=True))  # there is an abs op here, making derivative inconstant
+    # else:
+    #     #loss = np.mean(np.linalg.norm(diff, axis=1))
+    #     # loss = np.mean(np.square(diff))
+    #     loss = np.sqrt(np.mean(diff * diff)).squeeze()
+    #
+    # return loss
 
 
 

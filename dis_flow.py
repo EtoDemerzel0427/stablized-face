@@ -42,16 +42,18 @@ def dis_flow_loss(vec_fx, vec_fy, prev_projected, projected, w, pose=True):
     motion = np.vstack((pred_x, pred_y))
     assert motion.shape[0] == 2
     diff = (projected - prev_projected - motion).T  # n x 2
+    loss_0 = np.sqrt(np.mean(w * np.sum(diff * diff, axis=1, keepdims=True)))
+    loss_1 = np.sqrt(np.mean(diff * diff))
 
-    if pose:
-        loss = np.sqrt(np.mean(w * np.sum(diff * diff, axis=1, keepdims=True)))
-        # loss = np.mean(w * np.linalg.norm(diff.T, axis=1, keepdims=True))
-    else:
-        loss = np.sqrt(np.mean(diff * diff))
-        #loss = np.mean(np.linalg.norm(diff, axis=0))
+    # if pose:
+    #     loss = np.sqrt(np.mean(w * np.sum(diff * diff, axis=1, keepdims=True)))
+    #
+    # else:
+    #     loss = np.sqrt(np.mean(diff * diff))
 
 
-    return loss, motion
+
+    return loss_0, loss_1, motion
 
 if __name__ == '__main__':
     import os, glob
